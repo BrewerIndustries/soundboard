@@ -1,0 +1,19 @@
+[Unit]
+Description=Soundboard (Next.js) — DEV
+After=network.target
+
+[Service]
+Type=simple
+User=dan
+WorkingDirectory=/opt/soundboard-dev
+Environment=NODE_ENV=production
+# Dev has its own .env (separate JARVIS_TOKEN, JARVIS_ENV=dev, and an isolated
+# SQLite DB + audio dir under /opt/soundboard-dev/data/).
+EnvironmentFile=/opt/soundboard-dev/.env
+# next directly so we override the start script's hardcoded :4720; dev = :4730.
+ExecStart=/opt/soundboard-dev/node_modules/.bin/next start -p 4730
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
