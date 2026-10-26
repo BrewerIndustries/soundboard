@@ -1,0 +1,56 @@
+{
+  // Soundboard — one Worker serving the static SPA (dist/) + the JSON API, same origin.
+  // Default (top-level) env = PROD: soundboard.dabrewer.dev. Not deployed until cutover.
+  // `--env dev` = DEV: soundboard-dev.dabrewer.dev.
+  // Secrets (per env, `wrangler secret put <NAME> [--env dev]`):
+  //   SESSION_SECRET, JARVIS_TOKEN
+  // Email: `send_email` binding EMAIL (Cloudflare Email Sending, sender noreply@dabrewer.dev).
+  //   Sends fail soft (link logged + returned to admins) until the domain is onboarded.
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "soundboard",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-10-01",
+  "account_id": "c7961085693c68b85b3f19dc03e15266",
+  "workers_dev": false,
+  "preview_urls": false,
+  "observability": { "enabled": true },
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    // Auth gate: every request (incl. static files) goes through the Worker first.
+    "run_worker_first": true
+  },
+  "routes": [{ "pattern": "soundboard.dabrewer.dev", "custom_domain": true }],
+  "vars": { "JARVIS_ENV": "prod", "BOOTSTRAP_ADMIN_EMAIL": "myemailisdanmail@gmail.com" },
+  "send_email": [{ "name": "EMAIL" }],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "soundboard-prod",
+      "database_id": "b064db31-1dcc-4581-875d-60fbebe76b67",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "r2_buckets": [{ "binding": "AUDIO", "bucket_name": "soundboard-audio-prod" }],
+
+  "env": {
+    "dev": {
+      "name": "soundboard-dev",
+      "workers_dev": false,
+      "preview_urls": false,
+      "routes": [{ "pattern": "soundboard-dev.dabrewer.dev", "custom_domain": true }],
+      "vars": { "JARVIS_ENV": "dev", "BOOTSTRAP_ADMIN_EMAIL": "myemailisdanmail@gmail.com" },
+      "send_email": [{ "name": "EMAIL" }],
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "soundboard-dev",
+          "database_id": "61a7cd79-1eae-412e-ad27-de6c2baafd86",
+          "migrations_dir": "migrations"
+        }
+      ],
+      "r2_buckets": [{ "binding": "AUDIO", "bucket_name": "soundboard-audio-dev" }]
+    }
+  }
+}

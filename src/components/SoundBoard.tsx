@@ -1,5 +1,3 @@
-"use client";
-
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import {
   activeClipCount,
@@ -26,8 +24,9 @@ import {
   type Page,
   type Sound,
 } from "@/lib/types";
+import { toLogin, type Me } from "@/lib/account";
+import AccountPanel from "@/components/AccountPanel";
 
-const TOKEN_KEY = "soundboard-token";
 const PREFS_KEY = "soundboard-playback";
 
 // Per-device playback prefs (volume + fade durations), kept in localStorage.
@@ -42,26 +41,23 @@ function loadPrefs(): Prefs {
   }
 }
 
-export default function SoundBoard({ env }: { env: string | null }) {
+export default function SoundBoard({ env, me }: { env: string | null; me: Me | null }) {
   const [boards, setBoards] = useState<Board[]>([]);
   const [loaded, setLoaded] = useState(false);
-  const [tokenRequired, setTokenRequired] = useState(false);
   const [boardId, setBoardId] = useState<string | null>(null);
   const [pageId, setPageId] = useState<string | null>(null);
-  const [token, setToken] = useState("");
-  const [showToken, setShowToken] = useState(false);
   const [edit, setEdit] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [modal, setModal] = useState<null | { kind: "board" } | { kind: "page" } | { kind: "sound"; pageId: string }>(null);
 
   const [showPlayback, setShowPlayback] = useState(false);
+  const [showAccount, setShowAccount] = useState(false);
   const [prefs, setPrefs] = useState<Prefs>(DEFAULT_PREFS);
 
   // Re-render whenever any pad changes state (playing, paused, fading…).
   useSyncExternalStore(subscribeClips, clipsVersion, () => 0);
 
   useEffect(() => {
-    setToken(localStorage.getItem(TOKEN_KEY) ?? "");
     setPrefs(loadPrefs());
     onClipError((msg) => setError(msg));
   }, []);
@@ -75,16 +71,18 @@ export default function SoundBoard({ env }: { env: string | null }) {
       const next = { ...prev, ...p };
       try {
         localStorage.setItem(PREFS_KEY, JSON.stringify(next));
-      } catch {}
+      } catch {
+        /* storage blocked (private mode) — prefs just won't persist */
+      }
       return next;
     });
 
   const load = useCallback(async () => {
     const res = await fetch("/api/boards", { cache: "no-store" });
+    if (res.status === 401) return toLogin();
     const data = await res.json();
     const next: Board[] = data.boards ?? [];
     setBoards(next);
-    setTokenRequired(Boolean(data.tokenRequired));
     setLoaded(true);
     // Reconcile the current selection against the refreshed tree.
     setBoardId((prev) => {
@@ -115,22 +113,14 @@ export default function SoundBoard({ env }: { env: string | null }) {
 
   // --- auth-aware writes -----------------------------------------------------
 
-  const authHeaders = useCallback(
-    (json = true): HeadersInit => ({
-      ...(json ? { "content-type": "application/json" } : {}),
-      ...(token ? { "x-jarvis-token": token } : {}),
-    }),
-    [token],
-  );
-
   const write = useCallback(
     async (url: string, method: string, body?: BodyInit, json = true): Promise<boolean> => {
       setError(null);
       try {
-        const res = await fetch(url, { method, headers: authHeaders(json), body });
+        // Auth rides on the HttpOnly session cookie (same origin).
+        const res = await fetch(url, { method, headers: json ? { "content-type": "application/json" } : {}, body });
         if (res.status === 401) {
-          setError("That action needs the write token. Set it above.");
-          setShowToken(true);
+          toLogin();
           return false;
         }
         if (!res.ok) {
@@ -145,7 +135,7 @@ export default function SoundBoard({ env }: { env: string | null }) {
         return false;
       }
     },
-    [authHeaders, load],
+    [load],
   );
 
   // --- playback --------------------------------------------------------------
@@ -154,11 +144,6 @@ export default function SoundBoard({ env }: { env: string | null }) {
   // the button row under it is play/pause, stop, fade in, fade out.
   const play = (sound: Sound) => startClip(sound.id, sound.key);
 
-  const saveToken = () => {
-    localStorage.setItem(TOKEN_KEY, token);
-    setShowToken(false);
-    setError(null);
-  };
 
   // --- mutations -------------------------------------------------------------
 
@@ -229,11 +214,11 @@ export default function SoundBoard({ env }: { env: string | null }) {
             {edit ? "Done" : "Edit"}
           </button>
           <button
-            onClick={() => setShowToken((v) => !v)}
-            title="Write token"
+            onClick={() => setShowAccount(true)}
+            title={me ? `Account — ${me.email}` : "Account"}
             className="rounded-full bg-white px-3 py-1.5 text-sm font-semibold text-[var(--muted)] ring-1 ring-black/10 hover:bg-black/5"
           >
-            {token ? "🔓" : "🔒"}
+            👤
           </button>
         </header>
 
@@ -267,23 +252,6 @@ export default function SoundBoard({ env }: { env: string | null }) {
               step={0.5}
               onChange={(v) => updatePrefs({ fadeOutMs: Math.round(v * 1000) })}
             />
-          </div>
-        )}
-
-        {/* token bar */}
-        {showToken && (
-          <div className="mb-4 flex flex-wrap items-center gap-2 rounded-xl bg-white p-3 shadow-sm ring-1 ring-black/5">
-            <span className="text-sm font-medium">Write token</span>
-            <input
-              type="password"
-              value={token}
-              onChange={(e) => setToken(e.target.value)}
-              placeholder={tokenRequired ? "required to edit" : "optional"}
-              className="min-w-48 flex-1 rounded-lg border border-[var(--line)] px-2.5 py-1.5 text-sm outline-none focus:border-[#534ab7]"
-            />
-            <button onClick={saveToken} className="rounded-lg bg-[#534ab7] px-3 py-1.5 text-sm font-semibold text-white">
-              Save
-            </button>
           </div>
         )}
 
@@ -457,6 +425,7 @@ export default function SoundBoard({ env }: { env: string | null }) {
         )}
       </div>
 
+      {showAccount && <AccountPanel me={me} onClose={() => setShowAccount(false)} />}
       {modal?.kind === "board" && (
         <BoardModal onClose={() => setModal(null)} onSubmit={(body) => write("/api/boards", "POST", JSON.stringify(body))} />
       )}

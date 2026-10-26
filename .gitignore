@@ -1,15 +1,17 @@
 .DS_Store
 /node_modules
-/.next
-/out
-/build
+/dist
+/.wrangler
 *.tsbuildinfo
-next-env.d.ts
 
-# Local data + secrets (audio bytes + SQLite live here; server-only)
+# Local data + secrets
 /data/*.db
 /data/*.db-*
 /data/sounds
+/.migrate-cache
+.dev.secrets
+.prod.secrets
+.dev.vars*
 .env
 .env.local
 .env*.local
