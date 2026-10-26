@@ -43,10 +43,8 @@ button { font-family: inherit; cursor: pointer; }
 /* Pad press feedback — briefly scales down + rings when playing. */
 .pad { transition: transform 90ms ease, box-shadow 120ms ease; }
 .pad:active { transform: scale(0.96); }
-.pad.playing {
-  transform: scale(0.97);
-  box-shadow: 0 0 0 3px var(--ring, #534ab7) inset;
-}
+/* The ring goes on the whole card (pad + its control row) while a clip is live. */
+.pad-card.playing { box-shadow: 0 0 0 3px var(--ring, #534ab7) inset; }
 
 /* Subtle progress sweep across a pad while its clip plays. */
 @keyframes padpulse {
@@ -54,4 +52,4 @@ button { font-family: inherit; cursor: pointer; }
   50% { opacity: 0.9; }
   100% { opacity: 0.55; }
 }
-.pad.playing .pad-eq { animation: padpulse 700ms ease-in-out infinite; }
+.pad-card.playing .pad-eq { animation: padpulse 700ms ease-in-out infinite; }
