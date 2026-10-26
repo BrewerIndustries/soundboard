@@ -71,9 +71,12 @@ ssh dan@100.102.159.57 /opt/soundboard/deploy/update.sh           # → MAIN (:4
 - `src/app/api/sounds/route.ts` — `POST` (multipart upload); `sounds/[id]` — `PATCH`/`DELETE`.
 - `src/app/api/audio/[key]/route.ts` — `GET` byte-serving with Range.
 - `src/app/page.tsx` — resolves `JARVIS_ENV`; **hard prod guard keys off `PORT === "4720"`**.
-- `src/components/SoundBoard.tsx` — the whole client UI: board rail, page tabs, pad grid,
-  create modals, Edit mode (rename/delete via prompt/confirm), token bar, playback
-  (one `<audio>` per key), env banner.
+- `src/components/SoundBoard.tsx` — the whole client UI: board rail, page tabs, pad grid
+  (each pad + play/pause/stop/fade-in/fade-out row), create modals, Edit mode
+  (rename/delete via prompt/confirm), token bar, 🔊 volume + fade-duration bar
+  (localStorage), env banner.
+- `src/lib/clipPlayer.ts` — pad playback via Web Audio (per-pad gain for fades → master
+  gain for volume); a `useSyncExternalStore` store of pad status. Mirrors music-kiosk's.
 - `src/app/globals.css` — base theme + DEV banner + pad press animation.
 - `.jarvis.json` — registry declaration read by the Launcher + Dashboard registry sync.
 - `deploy/` — systemd units, `update*.sh`, `README.md`.

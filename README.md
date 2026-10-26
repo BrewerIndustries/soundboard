@@ -27,6 +27,18 @@ The seed board on a fresh database is **Hannah** with a **Sounds** page — the
 original idea's starting point. Add the first pad by uploading a clip (e.g.
 "jam quieter").
 
+## Playback controls
+
+Tap a pad to play it from the top (tapping a live pad restarts it). Each pad has a
+control row: **▶/⏸** play/pause, **■** stop, **fade in** (start silent and rise,
+resume a paused pad with a fade, or pull back a fade-out) and **fade out** (then
+stop). The **🔊** button opens Volume + Fade in/out durations, saved per device in
+`localStorage`. **■ Stop all** appears while anything plays.
+
+Pads play through Web Audio (`src/lib/clipPlayer.ts`): a per-pad gain node for
+fades into a master gain for the volume, which also works on iOS (it ignores
+`<audio>.volume`). The same player lives in music-kiosk.
+
 ## Environments (both on the jarvis server, `dan@100.102.159.57`, over Tailscale)
 
 | Env  | Branch | Path                  | Port | Service          | URL                                 |

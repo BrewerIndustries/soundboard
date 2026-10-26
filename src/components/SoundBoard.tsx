@@ -1,6 +1,21 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import {
+  activeClipCount,
+  clipStatus,
+  clipsVersion,
+  fadeInClip,
+  fadeOutClip,
+  onClipError,
+  setMasterVolume,
+  startClip,
+  stopAllClips,
+  stopClip,
+  subscribeClips,
+  togglePlay,
+  type ClipStatus,
+} from "@/lib/clipPlayer";
 import {
   ACCENT,
   ACCENT_KEYS,
@@ -13,6 +28,19 @@ import {
 } from "@/lib/types";
 
 const TOKEN_KEY = "soundboard-token";
+const PREFS_KEY = "soundboard-playback";
+
+// Per-device playback prefs (volume + fade durations), kept in localStorage.
+type Prefs = { volume: number; fadeInMs: number; fadeOutMs: number };
+const DEFAULT_PREFS: Prefs = { volume: 100, fadeInMs: 2000, fadeOutMs: 3000 };
+
+function loadPrefs(): Prefs {
+  try {
+    return { ...DEFAULT_PREFS, ...JSON.parse(localStorage.getItem(PREFS_KEY) ?? "{}") };
+  } catch {
+    return DEFAULT_PREFS;
+  }
+}
 
 export default function SoundBoard({ env }: { env: string | null }) {
   const [boards, setBoards] = useState<Board[]>([]);
@@ -26,13 +54,30 @@ export default function SoundBoard({ env }: { env: string | null }) {
   const [error, setError] = useState<string | null>(null);
   const [modal, setModal] = useState<null | { kind: "board" } | { kind: "page" } | { kind: "sound"; pageId: string }>(null);
 
-  // One <audio> element per storage key, reused across taps.
-  const audioMap = useRef<Map<string, HTMLAudioElement>>(new Map());
-  const [playing, setPlaying] = useState<Set<string>>(new Set());
+  const [showPlayback, setShowPlayback] = useState(false);
+  const [prefs, setPrefs] = useState<Prefs>(DEFAULT_PREFS);
+
+  // Re-render whenever any pad changes state (playing, paused, fading…).
+  useSyncExternalStore(subscribeClips, clipsVersion, () => 0);
 
   useEffect(() => {
     setToken(localStorage.getItem(TOKEN_KEY) ?? "");
+    setPrefs(loadPrefs());
+    onClipError((msg) => setError(msg));
   }, []);
+
+  useEffect(() => {
+    setMasterVolume(prefs.volume);
+  }, [prefs.volume]);
+
+  const updatePrefs = (p: Partial<Prefs>) =>
+    setPrefs((prev) => {
+      const next = { ...prev, ...p };
+      try {
+        localStorage.setItem(PREFS_KEY, JSON.stringify(next));
+      } catch {}
+      return next;
+    });
 
   const load = useCallback(async () => {
     const res = await fetch("/api/boards", { cache: "no-store" });
@@ -105,23 +150,9 @@ export default function SoundBoard({ env }: { env: string | null }) {
 
   // --- playback --------------------------------------------------------------
 
-  const play = useCallback((sound: Sound) => {
-    let audio = audioMap.current.get(sound.key);
-    if (!audio) {
-      audio = new Audio(`/api/audio/${encodeURIComponent(sound.key)}`);
-      audio.addEventListener("ended", () =>
-        setPlaying((s) => {
-          const n = new Set(s);
-          n.delete(sound.id);
-          return n;
-        }),
-      );
-      audioMap.current.set(sound.key, audio);
-    }
-    audio.currentTime = 0;
-    audio.play().catch(() => setError("Could not play this clip."));
-    setPlaying((s) => new Set(s).add(sound.id));
-  }, []);
+  // Tapping a pad plays it from the top (restarting it if it's already live);
+  // the button row under it is play/pause, stop, fade in, fade out.
+  const play = (sound: Sound) => startClip(sound.id, sound.key);
 
   const saveToken = () => {
     localStorage.setItem(TOKEN_KEY, token);
@@ -170,6 +201,23 @@ export default function SoundBoard({ env }: { env: string | null }) {
               Boards → pages → tap a pad to play.
             </p>
           </div>
+          {activeClipCount() > 0 && (
+            <button
+              onClick={stopAllClips}
+              className="rounded-full bg-white px-3 py-1.5 text-sm font-semibold text-[var(--ink)] ring-1 ring-black/10 hover:bg-black/5"
+            >
+              ■ Stop all
+            </button>
+          )}
+          <button
+            onClick={() => setShowPlayback((v) => !v)}
+            title="Volume & fades"
+            className={`rounded-full px-3 py-1.5 text-sm font-semibold ring-1 transition ${
+              showPlayback ? "bg-[#534ab7] text-white ring-[#534ab7]" : "bg-white text-[var(--muted)] ring-black/10 hover:bg-black/5"
+            }`}
+          >
+            🔊
+          </button>
           <button
             onClick={() => setEdit((e) => !e)}
             className={`rounded-full px-3.5 py-1.5 text-sm font-semibold ring-1 transition ${
@@ -188,6 +236,39 @@ export default function SoundBoard({ env }: { env: string | null }) {
             {token ? "🔓" : "🔒"}
           </button>
         </header>
+
+        {/* volume + fade durations */}
+        {showPlayback && (
+          <div className="mb-4 grid gap-3 rounded-xl bg-white p-3 shadow-sm ring-1 ring-black/5 sm:grid-cols-3">
+            <PrefSlider
+              label="Volume"
+              value={prefs.volume}
+              display={`${prefs.volume}%`}
+              min={0}
+              max={100}
+              step={1}
+              onChange={(v) => updatePrefs({ volume: v })}
+            />
+            <PrefSlider
+              label="Fade in"
+              value={prefs.fadeInMs / 1000}
+              display={`${(prefs.fadeInMs / 1000).toFixed(1)} s`}
+              min={0.5}
+              max={15}
+              step={0.5}
+              onChange={(v) => updatePrefs({ fadeInMs: Math.round(v * 1000) })}
+            />
+            <PrefSlider
+              label="Fade out"
+              value={prefs.fadeOutMs / 1000}
+              display={`${(prefs.fadeOutMs / 1000).toFixed(1)} s`}
+              min={0.5}
+              max={15}
+              step={0.5}
+              onChange={(v) => updatePrefs({ fadeOutMs: Math.round(v * 1000) })}
+            />
+          </div>
+        )}
 
         {/* token bar */}
         {showToken && (
@@ -314,20 +395,49 @@ export default function SoundBoard({ env }: { env: string | null }) {
           <div className="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-3">
             {page.sounds.map((s) => {
               const a = ACCENT[s.accent];
-              const isPlaying = playing.has(s.id);
+              const status = clipStatus(s.id);
+              const live = status !== "stopped";
+              const audible = status === "playing" || status === "fading-in" || status === "fading-out";
               return (
-                <div key={s.id} className="relative">
+                <div
+                  key={s.id}
+                  className={`pad-card ${live ? "playing" : ""} relative flex flex-col overflow-hidden rounded-2xl ring-1`}
+                  style={{ background: a.tile, color: a.fg, borderColor: a.border, ["--ring" as string]: a.dot }}
+                >
                   <button
                     onClick={() => play(s)}
-                    className={`pad ${isPlaying ? "playing" : ""} flex h-28 w-full flex-col items-center justify-center gap-1.5 rounded-2xl px-3 text-center ring-1`}
-                    style={{ background: a.tile, color: a.fg, borderColor: a.border, ["--ring" as string]: a.dot }}
+                    title={live ? "Restart" : "Play"}
+                    className="pad flex h-24 w-full flex-col items-center justify-center gap-1 px-3 text-center"
                   >
-                    <span className="pad-eq text-2xl" style={{ color: a.dot }}>
-                      {isPlaying ? "▮▮▮" : "▶"}
+                    <span className="pad-eq text-xl" style={{ color: a.dot }}>
+                      {audible ? "▮▮▮" : status === "paused" ? "❚❚" : "▶"}
                     </span>
                     <span className="line-clamp-2 text-sm font-semibold leading-tight">{s.label}</span>
-                    <span className="text-[11px] opacity-60">{formatBytes(s.size)}</span>
+                    <span className="text-[11px] opacity-60">{STATUS_LABEL[status] ?? formatBytes(s.size)}</span>
                   </button>
+                  <div className="grid grid-cols-4 gap-1 px-1.5 pb-1.5">
+                    <PadBtn
+                      label={audible ? "Pause" : "Play"}
+                      color={a.dot}
+                      onClick={() => togglePlay(s.id, s.key)}
+                    >
+                      {audible ? "⏸" : "▶"}
+                    </PadBtn>
+                    <PadBtn label="Stop" color={a.dot} disabled={!live} onClick={() => stopClip(s.id)}>
+                      ■
+                    </PadBtn>
+                    <PadBtn label="Fade in" color={a.dot} onClick={() => fadeInClip(s.id, s.key, prefs.fadeInMs)}>
+                      <FadeIcon dir="in" />
+                    </PadBtn>
+                    <PadBtn
+                      label="Fade out"
+                      color={a.dot}
+                      disabled={!live}
+                      onClick={() => fadeOutClip(s.id, prefs.fadeOutMs)}
+                    >
+                      <FadeIcon dir="out" />
+                    </PadBtn>
+                  </div>
                   {edit && (
                     <div className="absolute right-1.5 top-1.5 flex gap-1">
                       <IconBtn title="Rename" onClick={() => relabelSound(s)}>✎</IconBtn>
@@ -339,7 +449,7 @@ export default function SoundBoard({ env }: { env: string | null }) {
             })}
             <button
               onClick={() => setModal({ kind: "sound", pageId: page.id })}
-              className="grid h-28 place-items-center rounded-2xl border-2 border-dashed border-[var(--line)] text-sm font-semibold text-[var(--muted)] transition hover:border-[#534ab7] hover:text-[#534ab7]"
+              className="grid min-h-[8.5rem] place-items-center rounded-2xl border-2 border-dashed border-[var(--line)] text-sm font-semibold text-[var(--muted)] transition hover:border-[#534ab7] hover:text-[#534ab7]"
             >
               ＋ Add sound
             </button>
@@ -368,6 +478,85 @@ export default function SoundBoard({ env }: { env: string | null }) {
 }
 
 /* ---------- small building blocks ---------- */
+
+const STATUS_LABEL: Partial<Record<ClipStatus, string>> = {
+  playing: "Playing",
+  paused: "Paused",
+  "fading-in": "Fading in…",
+  "fading-out": "Fading out…",
+};
+
+function PadBtn({
+  children,
+  label,
+  color,
+  disabled,
+  onClick,
+}: {
+  children: React.ReactNode;
+  label: string;
+  color: string;
+  disabled?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      aria-label={label}
+      title={label}
+      className="flex h-8 items-center justify-center rounded-lg bg-white/60 text-sm transition hover:bg-white disabled:opacity-35 disabled:hover:bg-white/60"
+      style={{ color }}
+    >
+      {children}
+    </button>
+  );
+}
+
+// A volume ramp: rising for fade in, falling for fade out.
+function FadeIcon({ dir }: { dir: "in" | "out" }) {
+  return (
+    <svg viewBox="0 0 20 14" className="h-3.5 w-5" aria-hidden="true">
+      <path d={dir === "in" ? "M1 13 L19 13 L19 1 Z" : "M1 13 L19 13 L1 1 Z"} fill="currentColor" />
+    </svg>
+  );
+}
+
+function PrefSlider({
+  label,
+  value,
+  display,
+  min,
+  max,
+  step,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  display: string;
+  min: number;
+  max: number;
+  step: number;
+  onChange: (v: number) => void;
+}) {
+  return (
+    <label className="text-sm">
+      <span className="flex justify-between font-medium">
+        {label}
+        <span className="tabular-nums text-[var(--muted)]">{display}</span>
+      </span>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        className="mt-1 w-full accent-[#534ab7]"
+      />
+    </label>
+  );
+}
 
 function PrimaryBtn({ children, onClick }: { children: React.ReactNode; onClick: () => void }) {
   return (
