@@ -16,11 +16,11 @@ R2, invite-only accounts); the legacy Next.js/SQLite app on the home server live
 | Env  | Wrangler     | Worker           | URL                                 | D1 / R2                                   |
 | ---- | ------------ | ---------------- | ----------------------------------- | ----------------------------------------- |
 | DEV  | `--env dev`  | `soundboard-dev` | https://soundboard-dev.dabrewer.dev | `soundboard-dev` / `soundboard-audio-dev` |
-| PROD | (top level)  | `soundboard`     | https://soundboard.dabrewer.dev     | `soundboard-prod` / `soundboard-audio-prod` — **NOT deployed yet** |
+| PROD | (top level)  | `soundboard`     | https://soundboard.dabrewer.dev     | `soundboard-prod` / `soundboard-audio-prod` — live 2026-11-03 |
 
-`soundboard.dabrewer.dev` still has an A record to the home server (prod = old app on
-:4720). **Don't `deploy:prod`, set prod secrets, or touch that DNS record** — the cutover
-is done with the user (steps in README).
+Prod is the Cloudflare Worker (custom domain; the old A record to the home server is
+gone). Prod secret values: `.prod.secrets` (gitignored). Deploy prod only with the user's OK:
+`env -u CLOUDFLARE_API_TOKEN npm run deploy:prod`.
 
 ## Commands  ⚠️ wrangler needs the OAuth login
 

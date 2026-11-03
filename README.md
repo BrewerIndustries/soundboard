@@ -20,10 +20,11 @@ and the JSON API on the same origin, with **D1** for boards/pages/sounds and a
 | Env  | Worker           | URL                                   | D1                | R2                      | Status |
 | ---- | ---------------- | ------------------------------------- | ----------------- | ----------------------- | ------ |
 | DEV  | `soundboard-dev` | https://soundboard-dev.dabrewer.dev   | `soundboard-dev`  | `soundboard-audio-dev`  | live, mirrors prod data |
-| PROD | `soundboard`     | https://soundboard.dabrewer.dev       | `soundboard-prod` | `soundboard-audio-prod` | **configured, not deployed** — see *Prod cutover* |
+| PROD | `soundboard`     | https://soundboard.dabrewer.dev       | `soundboard-prod` | `soundboard-audio-prod` | **live** since 2026-11-03 (see *Prod cutover*) |
 
-Until cutover, production is still the old Next.js app on the home server
-(`/opt/soundboard`, :4720; legacy `dev`/`main` branches, `deploy/` folder).
+Prod moved off the home server on 2026-11-03. The old Next.js app (`/opt/soundboard`,
+:4720, `deploy/` folder) is no longer reachable at soundboard.dabrewer.dev; its
+systemd unit + nginx block are still to be stopped (cutover step 8).
 
 ## The model — boards → pages → sounds
 
@@ -171,7 +172,7 @@ JARVIS_TOKEN=… node scripts/verify-audio.mjs https://soundboard-dev.dabrewer.d
 
 Cache (dump, clips, manifest with sha256, generated SQL) goes to `.migrate-cache/` (gitignored).
 
-## Prod cutover (pending — do with the user)
+## Prod cutover (done 2026-11-03 except step 6 admin password, step 8 server cleanup)
 
 1. Apply migrations: `env -u CLOUDFLARE_API_TOKEN npm run db:migrate:prod`.
 2. Data: freeze edits on the home server, then
