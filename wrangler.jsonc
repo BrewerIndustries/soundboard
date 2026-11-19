@@ -33,6 +33,17 @@
     }
   ],
   "r2_buckets": [{ "binding": "AUDIO", "bucket_name": "soundboard-audio-prod" }],
+  // YouTube clip extractor: a Cloudflare Container behind a Durable Object.
+  // Wrangler builds the image from container/Dockerfile on deploy (needs Docker).
+  "containers": [
+    {
+      "class_name": "YtContainer",
+      "scheduling_policy": "durable_object",
+      "images": { "yt": { "dockerfile": "./container/Dockerfile", "build_context": "./container" } }
+    }
+  ],
+  "durable_objects": { "bindings": [{ "name": "YT", "class_name": "YtContainer" }] },
+  "exports": { "YtContainer": { "type": "durable-object", "storage": "sqlite" } },
 
   "env": {
     "dev": {
@@ -50,7 +61,16 @@
           "migrations_dir": "migrations"
         }
       ],
-      "r2_buckets": [{ "binding": "AUDIO", "bucket_name": "soundboard-audio-dev" }]
+      "r2_buckets": [{ "binding": "AUDIO", "bucket_name": "soundboard-audio-dev" }],
+      "containers": [
+        {
+          "class_name": "YtContainer",
+          "scheduling_policy": "durable_object",
+          "images": { "yt": { "dockerfile": "./container/Dockerfile", "build_context": "./container" } }
+        }
+      ],
+      "durable_objects": { "bindings": [{ "name": "YT", "class_name": "YtContainer" }] },
+      "exports": { "YtContainer": { "type": "durable-object", "storage": "sqlite" } }
     }
   }
 }

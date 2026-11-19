@@ -40,6 +40,32 @@ button opens Volume + Fade durations (per device, `localStorage`). **■ Stop al
 appears while anything plays. Playback is Web Audio (`src/lib/clipPlayer.ts`), so
 volume + fades work on iOS too. The same player lives in music-kiosk.
 
+## Importing a pad from YouTube
+
+**＋ Add sound → From YouTube**: paste a video link, optionally set **Start** / **End**
+(`0:12`, `1:02:03`), and the server pulls the audio, trims it, converts it to mp3 and
+creates the pad. The **Check** button fills in the title and length first; the label
+is pre-filled from the title and can be edited. Caps: 10 minutes and 20 MB per clip.
+
+Workers cannot run yt-dlp, so extraction happens in a **Cloudflare Container**
+(`container/`): Python + `yt-dlp[default]` + `ffmpeg`, plus the
+[bgutil PO-token provider](https://github.com/Brainicism/bgutil-ytdlp-pot-provider)
+for YouTube's attestation checks. The container is private — it is reached only
+through the `YtContainer` Durable Object (`worker/yt.ts`), which starts it on
+demand, waits for its `/health`, forwards requests and lets it go idle after 3
+minutes. The Worker stores the returned mp3 in R2 like any uploaded clip.
+
+- Instance type: `basic` (1 GiB, ¼ vCPU) — plenty for audio; raise to `standard-1`
+  in `worker/yt.ts` if ffmpeg ever runs out of memory.
+- Two containers (`pool-0`, `pool-1`) so two imports can run at once; a third gets
+  a "busy" error rather than queueing.
+- If YouTube starts refusing Cloudflare's egress IPs ("Sign in to confirm you're not
+  a bot"), set either secret and redeploy:
+  - `YTDLP_PROXY` — an HTTP/SOCKS proxy URL for yt-dlp.
+  - `YTDLP_COOKIES` — the text of a `cookies.txt` from a throwaway YouTube account.
+- YouTube's terms forbid downloading without permission; this is for clips you have
+  the right to use.
+
 ## Accounts & auth
 
 Everything except `GET /api/health` and the sign-in pages needs one of:
@@ -112,6 +138,8 @@ All JSON. "session|token" = a user session cookie or the bearer token.
 | `POST /api/sounds`                   | session/token | Upload a pad — multipart `file, pageId, label?, accent?`; `audio/*`, ≤ 25 MB. |
 | `PATCH /api/sounds/:id`              | session/token | Relabel / recolour / reorder. |
 | `DELETE /api/sounds/:id`             | session/token | Delete pad + R2 object. |
+| `POST /api/youtube/info`             | session/token | `{ url }` → `{ title, uploader, duration, thumbnail }` (title check in the dialog). |
+| `POST /api/youtube`                  | session/token | `{ url, pageId, start?, end?, label?, accent? }` → pulls via the container and creates the pad: `{ sound }`. |
 | `GET /api/audio/:key`                | session/token | Clip bytes from R2; **Range → 206**, `Content-Type` from the key's extension. |
 
 **music-kiosk contract:** `GET /api/boards` and `GET /api/audio/<key>` (with Range),
@@ -143,6 +171,12 @@ env -u CLOUDFLARE_API_TOKEN npx wrangler d1 migrations apply soundboard-dev --en
 env -u CLOUDFLARE_API_TOKEN npm run deploy:dev
 env -u CLOUDFLARE_API_TOKEN npx wrangler tail soundboard-dev     # logs (incl. fail-soft email links)
 ```
+
+The YouTube extractor adds a Container, so **deploys need Docker running** locally
+(wrangler builds and pushes `container/Dockerfile` on deploy). Local `wrangler dev`
+will also try to pull the image; if Docker is not running, everything except
+`/api/youtube*` still works. The first container deploy takes a few minutes to build
+the image and provision instances.
 
 ### Secrets (per env, `wrangler secret put <NAME> [--env dev]`)
 

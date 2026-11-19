@@ -12,6 +12,7 @@ import { authenticate } from "./auth";
 import { authRoutes, sameOrigin } from "./accounts";
 import * as db from "./db";
 import { deleteAudio, putAudio, serveAudio } from "./storage";
+import { youtubeImport, youtubeInfo } from "./yt";
 
 const MAX_BYTES = 25 * 1024 * 1024; // 25 MB per clip
 const AUTH_PAGES = new Set(["/login", "/forgot", "/reset", "/invite"]);
@@ -51,6 +52,11 @@ async function api(req: Request, env: Env, path: string, method: string): Promis
   }
 
   if (resource === "sounds" && !id && method === "POST") return upload(req, env);
+
+  // YouTube → pad import (container-backed). `/api/youtube/info` looks a video up,
+  // `/api/youtube` pulls the clip and creates the pad. See worker/yt.ts.
+  if (resource === "youtube" && id === "info" && method === "POST") return youtubeInfo(req, env);
+  if (resource === "youtube" && !id && method === "POST") return youtubeImport(req, env);
 
   if (id && (resource === "boards" || resource === "pages" || resource === "sounds")) {
     if (method === "PATCH") {
@@ -168,3 +174,7 @@ export default {
     return withCookie(await env.ASSETS.fetch(req), cookie);
   },
 } satisfies ExportedHandler<Env>;
+
+// Durable Object that owns the YouTube extractor container (see worker/yt.ts).
+// Wrangler resolves the class from the Worker entry's exports.
+export { YtContainer } from "./yt";
