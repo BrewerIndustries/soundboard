@@ -408,7 +408,7 @@ export default function SoundBoard({ env, me }: { env: string | null; me: Me | n
                     <span className="line-clamp-2 text-sm font-semibold leading-tight">{s.label}</span>
                     <span className="text-[11px] opacity-60">{STATUS_LABEL[status] ?? formatBytes(s.size)}</span>
                   </button>
-                  <div className="grid grid-cols-4 gap-1 px-1.5 pb-1.5">
+                  <div className="grid grid-cols-5 gap-1 px-1.5 pb-1.5">
                     <PadBtn
                       label={audible ? "Pause" : "Play"}
                       color={a.dot}
@@ -430,6 +430,16 @@ export default function SoundBoard({ env, me }: { env: string | null; me: Me | n
                     >
                       <FadeIcon dir="out" />
                     </PadBtn>
+                    <a
+                      href={`/api/audio/${s.key}?download=1`}
+                      download
+                      title="Download"
+                      aria-label={`Download ${s.label}`}
+                      className="flex h-8 items-center justify-center rounded-lg bg-white/60 text-sm transition hover:bg-white"
+                      style={{ color: a.dot }}
+                    >
+                      ⬇
+                    </a>
                   </div>
                   {edit && (
                     <div className="absolute right-1.5 top-1.5 flex gap-1">

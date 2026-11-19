@@ -140,7 +140,7 @@ All JSON. "session|token" = a user session cookie or the bearer token.
 | `DELETE /api/sounds/:id`             | session/token | Delete pad + R2 object. |
 | `POST /api/youtube/info`             | session/token | `{ url }` → `{ title, uploader, duration, thumbnail }` (title check in the dialog). |
 | `POST /api/youtube`                  | session/token | `{ url, pageId, start?, end?, label?, accent? }` → pulls via the container and creates the pad: `{ sound }`. |
-| `GET /api/audio/:key`                | session/token | Clip bytes from R2; **Range → 206**, `Content-Type` from the key's extension. |
+| `GET /api/audio/:key`                | session/token | Clip bytes from R2; **Range → 206**, `Content-Type` from the key's extension. `?download=1` → `Content-Disposition: attachment` named after the pad. |
 
 **music-kiosk contract:** `GET /api/boards` and `GET /api/audio/<key>` (with Range),
 called through a service binding to this Worker with `Authorization: Bearer <JARVIS_TOKEN>`.

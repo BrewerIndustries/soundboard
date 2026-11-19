@@ -38,6 +38,20 @@ export async function deleteAudio(env: Env, keys: string[]): Promise<void> {
 
 const AUDIO_HEADERS = { "accept-ranges": "bytes", "cache-control": "private, max-age=31536000, immutable" };
 
+/** `Content-Disposition: attachment` filename from the pad label, ASCII + RFC 5987. */
+function attachmentName(label: string, key: string): string {
+  const ext = key.split(".").pop() ?? "mp3";
+  const printable = [...label].filter((ch) => ch.charCodeAt(0) >= 32).join("");
+  const base =
+    printable
+      .replace(/[\\/:*?"<>|]+/g, "-")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 80) || "sound";
+  const ascii = base.replace(/[^\x20-\x7e]/g, "").trim() || "sound";
+  return `attachment; filename="${ascii}.${ext}"; filename*=UTF-8''${encodeURIComponent(`${base}.${ext}`).replace(/'/g, "%27")}`;
+}
+
 /** GET /api/audio/<key> — R2 bytes with single-range (206) support for Safari/iOS. */
 export async function serveAudio(env: Env, req: Request, key: string): Promise<Response> {
   if (!isSafeKey(key)) return Response.json({ error: "not found" }, { status: 404 });
@@ -45,6 +59,16 @@ export async function serveAudio(env: Env, req: Request, key: string): Promise<R
   const head = await env.AUDIO.head(key);
   if (!head) return Response.json({ error: "not found" }, { status: 404 });
   const total = head.size;
+
+  // ?download=1 → attachment named after the pad, for the pad's ⬇ button.
+  let extra: Record<string, string> = {};
+  if (new URL(req.url).searchParams.has("download")) {
+    const row = await env.DB.prepare(`SELECT label, filename FROM sounds WHERE key = ?`)
+      .bind(key)
+      .first<{ label: string; filename: string }>();
+    const label = row?.label || row?.filename?.replace(/\.[^.]+$/, "") || "sound";
+    extra = { "content-disposition": attachmentName(label, key) };
+  }
 
   const range = req.headers.get("range");
   const m = range ? /^bytes=(\d*)-(\d*)$/.exec(range.trim()) : null;
@@ -68,6 +92,7 @@ export async function serveAudio(env: Env, req: Request, key: string): Promise<R
       status: 206,
       headers: {
         ...AUDIO_HEADERS,
+        ...extra,
         "content-type": type,
         "content-length": String(end - start + 1),
         "content-range": `bytes ${start}-${end}/${total}`,
@@ -80,6 +105,6 @@ export async function serveAudio(env: Env, req: Request, key: string): Promise<R
   if (!obj) return Response.json({ error: "not found" }, { status: 404 });
   return new Response(obj.body, {
     status: 200,
-    headers: { ...AUDIO_HEADERS, "content-type": type, "content-length": String(total), etag: head.httpEtag },
+    headers: { ...AUDIO_HEADERS, ...extra, "content-type": type, "content-length": String(total), etag: head.httpEtag },
   });
 }
