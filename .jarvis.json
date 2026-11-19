@@ -2,8 +2,27 @@
   "id": "soundboard",
   "name": "Soundboard",
   "category": "standalone",
-  "description": "A personal soundboard: multiple boards, each with pages of tap-to-play sound pads. Audio bytes live on the jarvis server's own disk; boards/pages/sounds persist in per-environment SQLite.",
-  "tech": ["Next.js 16", "React 19", "TypeScript", "Tailwind CSS v4", "SQLite (better-sqlite3)"],
-  "status": { "prod": "live", "dev": "live" },
-  "deploy": { "prod": { "port": 4720 }, "dev": { "port": 4730 } }
+  "description": "A personal soundboard: multiple boards, each with pages of tap-to-play sound pads. Invite-only accounts. One Cloudflare Worker serves the SPA + API; boards/pages/sounds in D1, audio in private R2.",
+  "tech": [
+    "React 19",
+    "TypeScript",
+    "Tailwind CSS v4",
+    "Vite",
+    "Cloudflare Workers",
+    "D1",
+    "R2",
+    "Email Sending"
+  ],
+  "status": {
+    "prod": "live",
+    "dev": "live"
+  },
+  "deploy": {
+    "prod": {
+      "url": "https://soundboard.dabrewer.dev/"
+    },
+    "dev": {
+      "url": "https://soundboard-dev.dabrewer.dev/"
+    }
+  }
 }

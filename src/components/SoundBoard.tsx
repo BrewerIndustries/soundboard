@@ -1,5 +1,3 @@
-"use client";
-
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import {
   activeClipCount,
@@ -26,8 +24,9 @@ import {
   type Page,
   type Sound,
 } from "@/lib/types";
+import { toLogin, type Me } from "@/lib/account";
+import AccountPanel from "@/components/AccountPanel";
 
-const TOKEN_KEY = "soundboard-token";
 const PREFS_KEY = "soundboard-playback";
 
 // Per-device playback prefs (volume + fade durations), kept in localStorage.
@@ -42,26 +41,23 @@ function loadPrefs(): Prefs {
   }
 }
 
-export default function SoundBoard({ env }: { env: string | null }) {
+export default function SoundBoard({ env, me }: { env: string | null; me: Me | null }) {
   const [boards, setBoards] = useState<Board[]>([]);
   const [loaded, setLoaded] = useState(false);
-  const [tokenRequired, setTokenRequired] = useState(false);
   const [boardId, setBoardId] = useState<string | null>(null);
   const [pageId, setPageId] = useState<string | null>(null);
-  const [token, setToken] = useState("");
-  const [showToken, setShowToken] = useState(false);
   const [edit, setEdit] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [modal, setModal] = useState<null | { kind: "board" } | { kind: "page" } | { kind: "sound"; pageId: string }>(null);
 
   const [showPlayback, setShowPlayback] = useState(false);
+  const [showAccount, setShowAccount] = useState(false);
   const [prefs, setPrefs] = useState<Prefs>(DEFAULT_PREFS);
 
   // Re-render whenever any pad changes state (playing, paused, fading…).
   useSyncExternalStore(subscribeClips, clipsVersion, () => 0);
 
   useEffect(() => {
-    setToken(localStorage.getItem(TOKEN_KEY) ?? "");
     setPrefs(loadPrefs());
     onClipError((msg) => setError(msg));
   }, []);
@@ -75,16 +71,18 @@ export default function SoundBoard({ env }: { env: string | null }) {
       const next = { ...prev, ...p };
       try {
         localStorage.setItem(PREFS_KEY, JSON.stringify(next));
-      } catch {}
+      } catch {
+        /* storage blocked (private mode) — prefs just won't persist */
+      }
       return next;
     });
 
   const load = useCallback(async () => {
     const res = await fetch("/api/boards", { cache: "no-store" });
+    if (res.status === 401) return toLogin();
     const data = await res.json();
     const next: Board[] = data.boards ?? [];
     setBoards(next);
-    setTokenRequired(Boolean(data.tokenRequired));
     setLoaded(true);
     // Reconcile the current selection against the refreshed tree.
     setBoardId((prev) => {
@@ -115,22 +113,14 @@ export default function SoundBoard({ env }: { env: string | null }) {
 
   // --- auth-aware writes -----------------------------------------------------
 
-  const authHeaders = useCallback(
-    (json = true): HeadersInit => ({
-      ...(json ? { "content-type": "application/json" } : {}),
-      ...(token ? { "x-jarvis-token": token } : {}),
-    }),
-    [token],
-  );
-
   const write = useCallback(
     async (url: string, method: string, body?: BodyInit, json = true): Promise<boolean> => {
       setError(null);
       try {
-        const res = await fetch(url, { method, headers: authHeaders(json), body });
+        // Auth rides on the HttpOnly session cookie (same origin).
+        const res = await fetch(url, { method, headers: json ? { "content-type": "application/json" } : {}, body });
         if (res.status === 401) {
-          setError("That action needs the write token. Set it above.");
-          setShowToken(true);
+          toLogin();
           return false;
         }
         if (!res.ok) {
@@ -145,7 +135,7 @@ export default function SoundBoard({ env }: { env: string | null }) {
         return false;
       }
     },
-    [authHeaders, load],
+    [load],
   );
 
   // --- playback --------------------------------------------------------------
@@ -154,11 +144,6 @@ export default function SoundBoard({ env }: { env: string | null }) {
   // the button row under it is play/pause, stop, fade in, fade out.
   const play = (sound: Sound) => startClip(sound.id, sound.key);
 
-  const saveToken = () => {
-    localStorage.setItem(TOKEN_KEY, token);
-    setShowToken(false);
-    setError(null);
-  };
 
   // --- mutations -------------------------------------------------------------
 
@@ -184,6 +169,31 @@ export default function SoundBoard({ env }: { env: string | null }) {
   const deleteSound = async (s: Sound) => {
     if (window.confirm(`Delete sound “${s.label}”?`)) await write(`/api/sounds/${s.id}`, "DELETE");
   };
+
+  // Ask the extractor container what a video is (title / length) before importing.
+  const lookupYouTube = useCallback(async (url: string) => {
+    setError(null);
+    try {
+      const res = await fetch("/api/youtube/info", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ url }),
+      });
+      if (res.status === 401) {
+        toLogin();
+        return null;
+      }
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(data.error ?? "Could not read that video");
+        return null;
+      }
+      return data as { title?: string; duration?: number; uploader?: string };
+    } catch {
+      setError("Network error — is the server up?");
+      return null;
+    }
+  }, []);
 
   return (
     <div className="min-h-screen">
@@ -229,11 +239,11 @@ export default function SoundBoard({ env }: { env: string | null }) {
             {edit ? "Done" : "Edit"}
           </button>
           <button
-            onClick={() => setShowToken((v) => !v)}
-            title="Write token"
+            onClick={() => setShowAccount(true)}
+            title={me ? `Account — ${me.email}` : "Account"}
             className="rounded-full bg-white px-3 py-1.5 text-sm font-semibold text-[var(--muted)] ring-1 ring-black/10 hover:bg-black/5"
           >
-            {token ? "🔓" : "🔒"}
+            👤
           </button>
         </header>
 
@@ -267,23 +277,6 @@ export default function SoundBoard({ env }: { env: string | null }) {
               step={0.5}
               onChange={(v) => updatePrefs({ fadeOutMs: Math.round(v * 1000) })}
             />
-          </div>
-        )}
-
-        {/* token bar */}
-        {showToken && (
-          <div className="mb-4 flex flex-wrap items-center gap-2 rounded-xl bg-white p-3 shadow-sm ring-1 ring-black/5">
-            <span className="text-sm font-medium">Write token</span>
-            <input
-              type="password"
-              value={token}
-              onChange={(e) => setToken(e.target.value)}
-              placeholder={tokenRequired ? "required to edit" : "optional"}
-              className="min-w-48 flex-1 rounded-lg border border-[var(--line)] px-2.5 py-1.5 text-sm outline-none focus:border-[#534ab7]"
-            />
-            <button onClick={saveToken} className="rounded-lg bg-[#534ab7] px-3 py-1.5 text-sm font-semibold text-white">
-              Save
-            </button>
           </div>
         )}
 
@@ -415,7 +408,7 @@ export default function SoundBoard({ env }: { env: string | null }) {
                     <span className="line-clamp-2 text-sm font-semibold leading-tight">{s.label}</span>
                     <span className="text-[11px] opacity-60">{STATUS_LABEL[status] ?? formatBytes(s.size)}</span>
                   </button>
-                  <div className="grid grid-cols-4 gap-1 px-1.5 pb-1.5">
+                  <div className="grid grid-cols-5 gap-1 px-1.5 pb-1.5">
                     <PadBtn
                       label={audible ? "Pause" : "Play"}
                       color={a.dot}
@@ -437,6 +430,16 @@ export default function SoundBoard({ env }: { env: string | null }) {
                     >
                       <FadeIcon dir="out" />
                     </PadBtn>
+                    <a
+                      href={`/api/audio/${s.key}?download=1`}
+                      download
+                      title="Download"
+                      aria-label={`Download ${s.label}`}
+                      className="flex h-8 items-center justify-center rounded-lg bg-white/60 text-sm transition hover:bg-white"
+                      style={{ color: a.dot }}
+                    >
+                      ⬇
+                    </a>
                   </div>
                   {edit && (
                     <div className="absolute right-1.5 top-1.5 flex gap-1">
@@ -457,6 +460,7 @@ export default function SoundBoard({ env }: { env: string | null }) {
         )}
       </div>
 
+      {showAccount && <AccountPanel me={me} onClose={() => setShowAccount(false)} />}
       {modal?.kind === "board" && (
         <BoardModal onClose={() => setModal(null)} onSubmit={(body) => write("/api/boards", "POST", JSON.stringify(body))} />
       )}
@@ -469,7 +473,9 @@ export default function SoundBoard({ env }: { env: string | null }) {
       {modal?.kind === "sound" && (
         <SoundModal
           onClose={() => setModal(null)}
-          onSubmit={(fd) => write("/api/sounds", "POST", fd, false)}
+          onUpload={(fd) => write("/api/sounds", "POST", fd, false)}
+          onLookup={lookupYouTube}
+          onYouTube={(body) => write("/api/youtube", "POST", JSON.stringify(body))}
           pageId={modal.pageId}
         />
       )}
@@ -658,17 +664,54 @@ function PageModal({ onClose, onSubmit }: { onClose: () => void; onSubmit: (name
   );
 }
 
-function SoundModal({ onClose, onSubmit, pageId }: { onClose: () => void; onSubmit: (fd: FormData) => Promise<boolean>; pageId: string }) {
+type YtLookup = { title?: string; duration?: number; uploader?: string };
+
+/** "1:23" / "1:02:03" / "83" → seconds, or null when it isn't a time. */
+function parseTime(value: string): number | null {
+  const s = value.trim();
+  if (!s) return null;
+  if (!/^\d+(:\d{1,2}){0,2}$/.test(s)) return null;
+  return s.split(":").reduce((acc, part) => acc * 60 + Number(part), 0);
+}
+
+const clock = (seconds: number) => {
+  const s = Math.max(0, Math.round(seconds));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = String(s % 60).padStart(2, "0");
+  return h ? `${h}:${String(m).padStart(2, "0")}:${sec}` : `${m}:${sec}`;
+};
+
+function SoundModal({
+  onClose,
+  onUpload,
+  onLookup,
+  onYouTube,
+  pageId,
+}: {
+  onClose: () => void;
+  onUpload: (fd: FormData) => Promise<boolean>;
+  onLookup: (url: string) => Promise<YtLookup | null>;
+  onYouTube: (body: Record<string, unknown>) => Promise<boolean>;
+  pageId: string;
+}) {
+  const [tab, setTab] = useState<"file" | "youtube">("file");
   const [file, setFile] = useState<File | null>(null);
   const [label, setLabel] = useState("");
   const [accent, setAccent] = useState<AccentKey>(PAD_PALETTE[0]);
   const [busy, setBusy] = useState(false);
 
+  const [ytUrl, setYtUrl] = useState("");
+  const [ytStart, setYtStart] = useState("");
+  const [ytEnd, setYtEnd] = useState("");
+  const [info, setInfo] = useState<YtLookup | null>(null);
+  const [checking, setChecking] = useState(false);
+
   const pickFile = (f: File | null) => {
     setFile(f);
     if (f && !label) setLabel(f.name.replace(/\.[^.]+$/, ""));
   };
-  const submit = async () => {
+  const uploadSubmit = async () => {
     if (!file) return;
     setBusy(true);
     const fd = new FormData();
@@ -676,21 +719,117 @@ function SoundModal({ onClose, onSubmit, pageId }: { onClose: () => void; onSubm
     fd.set("pageId", pageId);
     fd.set("label", label.trim());
     fd.set("accent", accent);
-    const ok = await onSubmit(fd);
+    const ok = await onUpload(fd);
     setBusy(false);
     if (ok) onClose();
   };
+
+  // Empty start/end mean "from the beginning" / "to the end" — 0 in both cases.
+  const startS = ytStart.trim() ? parseTime(ytStart) : 0;
+  const endS = ytEnd.trim() ? parseTime(ytEnd) : 0;
+  const timesOk = startS !== null && endS !== null && (endS === 0 || endS > startS);
+  const ytReady = Boolean(ytUrl.trim()) && timesOk;
+
+  const check = async () => {
+    if (!ytUrl.trim()) return;
+    setChecking(true);
+    const found = await onLookup(ytUrl.trim());
+    setChecking(false);
+    if (found) {
+      setInfo(found);
+      if (!label && found.title) setLabel(found.title);
+    }
+  };
+
+  const ytSubmit = async () => {
+    if (!ytReady) return;
+    setBusy(true);
+    const ok = await onYouTube({
+      url: ytUrl.trim(),
+      pageId,
+      start: startS ?? 0,
+      end: endS ?? 0,
+      label: label.trim(),
+      accent,
+    });
+    setBusy(false);
+    if (ok) onClose();
+  };
+
   return (
     <Modal title="Add sound" onClose={onClose}>
-      <label className="mb-1 block text-sm font-medium">Audio file</label>
-      <input type="file" accept="audio/*" onChange={(e) => pickFile(e.target.files?.[0] ?? null)}
-        className="mb-3 w-full text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-[#EEEDFE] file:px-3 file:py-1.5 file:text-sm file:font-semibold file:text-[#534ab7]" />
+      <div className="mb-4 flex gap-1 rounded-xl bg-black/5 p-1 text-sm font-semibold">
+        {(["file", "youtube"] as const).map((k) => (
+          <button
+            key={k}
+            onClick={() => setTab(k)}
+            className={`flex-1 rounded-lg px-3 py-1.5 transition ${
+              tab === k ? "bg-white shadow-sm" : "text-[var(--muted)] hover:text-[var(--ink)]"
+            }`}
+          >
+            {k === "file" ? "Upload a file" : "From YouTube"}
+          </button>
+        ))}
+      </div>
+
+      {tab === "file" ? (
+        <>
+          <label className="mb-1 block text-sm font-medium">Audio file</label>
+          <input type="file" accept="audio/*" onChange={(e) => pickFile(e.target.files?.[0] ?? null)}
+            className="mb-3 w-full text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-[#EEEDFE] file:px-3 file:py-1.5 file:text-sm file:font-semibold file:text-[#534ab7]" />
+        </>
+      ) : (
+        <>
+          <label className="mb-1 block text-sm font-medium">YouTube link</label>
+          <div className="mb-2 flex gap-2">
+            <input value={ytUrl} onChange={(e) => setYtUrl(e.target.value)}
+              onBlur={() => { if (ytUrl.trim() && !info) void check(); }}
+              placeholder="https://youtube.com/watch?v=…"
+              className="w-full rounded-lg border border-[var(--line)] px-3 py-2 text-sm outline-none focus:border-[#534ab7]" />
+            <button onClick={check} disabled={!ytUrl.trim() || checking}
+              className="shrink-0 rounded-lg bg-[#EEEDFE] px-3 text-sm font-semibold text-[#534ab7] transition hover:brightness-105 disabled:opacity-40">
+              {checking ? "Checking…" : "Check"}
+            </button>
+          </div>
+          {info && (
+            <p className="mb-3 text-xs text-[var(--muted)]">
+              {info.title || "Video found"}{info.duration ? ` · ${clock(info.duration)}` : ""}
+            </p>
+          )}
+          <div className="mb-1 grid grid-cols-2 gap-2">
+            <label className="text-sm">
+              <span className="mb-1 block font-medium">Start</span>
+              <input value={ytStart} onChange={(e) => setYtStart(e.target.value)} placeholder="0:00"
+                className="w-full rounded-lg border border-[var(--line)] px-3 py-2 text-sm outline-none focus:border-[#534ab7]" />
+            </label>
+            <label className="text-sm">
+              <span className="mb-1 block font-medium">End</span>
+              <input value={ytEnd} onChange={(e) => setYtEnd(e.target.value)} placeholder="end of video"
+                className="w-full rounded-lg border border-[var(--line)] px-3 py-2 text-sm outline-none focus:border-[#534ab7]" />
+            </label>
+          </div>
+          <p className="mb-3 text-xs text-[var(--muted)]">
+            {timesOk
+              ? "Trim to the exact moment you want — max 10 minutes."
+              : "Times look like 0:12 or 1:02:03, and the end has to come after the start."}
+          </p>
+        </>
+      )}
+
       <label className="mb-1 block text-sm font-medium">Label</label>
       <input value={label} onChange={(e) => setLabel(e.target.value)}
-        className="mb-3 w-full rounded-lg border border-[var(--line)] px-3 py-2 text-sm outline-none focus:border-[#534ab7]" placeholder="jam quieter" />
+        className="mb-3 w-full rounded-lg border border-[var(--line)] px-3 py-2 text-sm outline-none focus:border-[#534ab7]"
+        placeholder={tab === "file" ? "jam quieter" : "auto-filled from the video title"} />
       <label className="mb-1 block text-sm font-medium">Pad colour</label>
       <div className="mb-5"><AccentPicker value={accent} onChange={setAccent} /></div>
-      <ModalActions onCancel={onClose} onSubmit={submit} submitLabel={busy ? "Uploading…" : "Add sound"} disabled={!file || busy} />
+
+      {tab === "file" ? (
+        <ModalActions onCancel={onClose} onSubmit={uploadSubmit}
+          submitLabel={busy ? "Uploading…" : "Add sound"} disabled={!file || busy} />
+      ) : (
+        <ModalActions onCancel={onClose} onSubmit={ytSubmit}
+          submitLabel={busy ? "Pulling clip…" : "Pull clip"} disabled={!ytReady || busy} />
+      )}
     </Modal>
   );
 }
