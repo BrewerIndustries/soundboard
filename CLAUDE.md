@@ -38,6 +38,29 @@ Local: `.dev.vars` (`SESSION_SECRET`, `JARVIS_TOKEN`), `npm run dev` → wrangle
 local D1/R2 and simulated email (writes .txt/.html under `.wrangler/tmp/email`).
 Dev secret values + the bootstrap-admin invite link: `.dev.secrets` (gitignored).
 
+## Deploying (the container image builds on the Jarvis box, not the Mac)
+
+The YouTube extractor adds a Cloudflare Container, and wrangler builds/pushes
+`container/Dockerfile` during `deploy`. **Do that on the Jarvis box**
+(`dan@100.102.159.57`, x86_64 — the `linux/amd64` platform Containers need), not on the
+Mac. Don't install Docker/Colima locally.
+
+```bash
+git push origin cloudflare
+ssh dan@100.102.159.57
+cd ~/build/soundboard-cf && git pull            # scratch checkout — NOT /opt (legacy app)
+npm install --legacy-peer-deps                  # npm ci refuses: lockfile is out of sync
+sudo apt install -y docker-buildx               # the box ships only the legacy builder
+# token: Workers Scripts, Containers, D1, R2 + DNS edit; keep it in a 600 file
+set -a; . ~/.config/jarvis/cloudflare.env; set +a
+npm run deploy:dev                              # builds + pushes the image, deploys DEV
+```
+
+The `env -u CLOUDFLARE_API_TOKEN` prefix in the commands above is for the **Mac's**
+OAuth login; on the server the API token *is* the auth, so run `npm run deploy:dev`
+directly. First deploy takes a few minutes (image build + container provisioning) and
+`/api/youtube*` may error until instances are up. Prod still needs the user's OK.
+
 ## Architecture map
 
 - `worker/index.ts` — router: `/api/health`; auth pages (`/login`, `/forgot`, `/reset`,
