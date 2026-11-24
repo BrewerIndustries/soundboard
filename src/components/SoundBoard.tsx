@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import {
   activeClipCount,
   clipStatus,
@@ -168,6 +168,67 @@ export default function SoundBoard({ env, me }: { env: string | null; me: Me | n
   };
   const deleteSound = async (s: Sound) => {
     if (window.confirm(`Delete sound “${s.label}”?`)) await write(`/api/sounds/${s.id}`, "DELETE");
+  };
+
+  // --- reordering (edit mode) -------------------------------------------------
+  // Drag a pad by its ⠿ handle. Pointer events rather than HTML5 drag-and-drop,
+  // which doesn't fire on touch screens.
+
+  type Drag = { id: string; order: string[]; moved: boolean };
+  // The ref is the live gesture (pointer events can outrun a re-render); the
+  // state mirrors it so the grid shows the pad moving.
+  const dragRef = useRef<Drag | null>(null);
+  const [drag, setDragState] = useState<Drag | null>(null);
+  const setDrag = (d: Drag | null) => {
+    dragRef.current = d;
+    setDragState(d);
+  };
+
+  const saveOrder = async (p: Page, ids: string[]) => {
+    const rank = new Map(ids.map((id, i) => [id, i]));
+    // Show the new order straight away; the write reloads the tree afterwards.
+    setBoards((bs) =>
+      bs.map((b) => ({
+        ...b,
+        pages: b.pages.map((pg) =>
+          pg.id !== p.id
+            ? pg
+            : { ...pg, sounds: [...pg.sounds].sort((x, y) => (rank.get(x.id) ?? 0) - (rank.get(y.id) ?? 0)) },
+        ),
+      })),
+    );
+    if (!(await write(`/api/pages/${p.id}/order`, "PUT", JSON.stringify({ ids })))) await load();
+  };
+
+  // Moves and the release are heard on window, not via pointer capture: reordering
+  // the grid moves DOM nodes, which silently drops capture mid-drag.
+  const dragStart = (e: React.PointerEvent, p: Page, id: string) => {
+    e.preventDefault();
+    const base = p.sounds.map((x) => x.id);
+    setDrag({ id, order: base, moved: false });
+
+    const move = (ev: PointerEvent) => {
+      const drag = dragRef.current;
+      if (!drag) return;
+      const over = document
+        .elementFromPoint(ev.clientX, ev.clientY)
+        ?.closest<HTMLElement>("[data-sound-id]")?.dataset.soundId;
+      if (!over || over === drag.id) return;
+      const order = drag.order.filter((x) => x !== drag.id);
+      order.splice(drag.order.indexOf(over), 0, drag.id);
+      setDrag({ ...drag, order, moved: true });
+    };
+    const end = (ev: PointerEvent) => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", end);
+      window.removeEventListener("pointercancel", end);
+      const drag = dragRef.current;
+      setDrag(null);
+      if (ev.type === "pointerup" && drag?.moved && drag.order.join() !== base.join()) void saveOrder(p, drag.order);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", end);
+    window.addEventListener("pointercancel", end);
   };
 
   // Ask the extractor container what a video is (title / length) before importing.
@@ -386,15 +447,22 @@ export default function SoundBoard({ env, me }: { env: string | null; me: Me | n
           />
         ) : (
           <div className="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-3">
-            {page.sounds.map((s) => {
+            {(drag
+              ? drag.order.map((id) => page.sounds.find((x) => x.id === id)).filter((x): x is Sound => !!x)
+              : page.sounds
+            ).map((s) => {
               const a = ACCENT[s.accent];
+              const dragging = drag?.id === s.id;
               const status = clipStatus(s.id);
               const live = status !== "stopped";
               const audible = status === "playing" || status === "fading-in" || status === "fading-out";
               return (
                 <div
                   key={s.id}
-                  className={`pad-card ${live ? "playing" : ""} relative flex flex-col overflow-hidden rounded-2xl ring-1`}
+                  data-sound-id={s.id}
+                  className={`pad-card ${live ? "playing" : ""} relative flex flex-col overflow-hidden rounded-2xl ring-1 transition-[opacity,transform] ${
+                    dragging ? "z-10 scale-105 opacity-70 shadow-lg" : ""
+                  }`}
                   style={{ background: a.tile, color: a.fg, borderColor: a.border, ["--ring" as string]: a.dot }}
                 >
                   <button
@@ -442,10 +510,23 @@ export default function SoundBoard({ env, me }: { env: string | null; me: Me | n
                     </a>
                   </div>
                   {edit && (
-                    <div className="absolute right-1.5 top-1.5 flex gap-1">
-                      <IconBtn title="Rename" onClick={() => relabelSound(s)}>✎</IconBtn>
-                      <IconBtn title="Delete" onClick={() => deleteSound(s)}>✕</IconBtn>
-                    </div>
+                    <>
+                      <div className="absolute left-1.5 top-1.5">
+                        <button
+                          type="button"
+                          title="Drag to reorder"
+                          aria-label={`Drag ${s.label} to reorder`}
+                          onPointerDown={(e) => dragStart(e, page, s.id)}
+                          className="grid h-6 w-6 cursor-grab touch-none place-items-center rounded-full bg-white/85 text-xs shadow ring-1 ring-black/10 hover:bg-white active:cursor-grabbing"
+                        >
+                          ⠿
+                        </button>
+                      </div>
+                      <div className="absolute right-1.5 top-1.5 flex gap-1">
+                        <IconBtn title="Rename" onClick={() => relabelSound(s)}>✎</IconBtn>
+                        <IconBtn title="Delete" onClick={() => deleteSound(s)}>✕</IconBtn>
+                      </div>
+                    </>
                   )}
                 </div>
               );
