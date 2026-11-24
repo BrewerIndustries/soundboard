@@ -2,7 +2,8 @@
 
 A personal **soundboard** — multiple **boards**, each holding **pages** of
 tap-to-play **sound pads**. Tap a pad to fire its clip; overlap them freely.
-Boards, pages, and pads are created, renamed, recoloured, and deleted inline.
+Boards, pages, and pads are created, renamed, recoloured, and deleted inline. In
+**Edit** mode each pad gets a ⠿ handle: drag it to reorder the pads on a page.
 
 **Runs on Cloudflare** (branch `cloudflare`): one Worker serves the static React UI
 and the JSON API on the same origin, with **D1** for boards/pages/sounds and a
@@ -135,6 +136,7 @@ All JSON. "session|token" = a user session cookie or the bearer token.
 | `POST /api/pages`                    | session/token | Add a page `{ boardId, name }`. |
 | `PATCH /api/pages/:id`               | session/token | Rename / reorder. |
 | `DELETE /api/pages/:id`              | session/token | Delete page (+ sounds, R2 objects). |
+| `PUT /api/pages/:id/order`           | session/token | Reorder pads `{ ids }` — must list exactly the page's sounds; one D1 batch. |
 | `POST /api/sounds`                   | session/token | Upload a pad — multipart `file, pageId, label?, accent?`; `audio/*`, ≤ 25 MB. |
 | `PATCH /api/sounds/:id`              | session/token | Relabel / recolour / reorder. |
 | `DELETE /api/sounds/:id`             | session/token | Delete pad + R2 object. |

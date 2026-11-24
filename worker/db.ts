@@ -178,6 +178,20 @@ export async function updateSound(db: D1Database, id: string, patch: SoundPatch)
   return true;
 }
 
+/**
+ * Set a page's pad order in one batch. `ids` must be exactly the page's sounds
+ * (no more, no fewer), so a stale client can't drop or smuggle in a pad.
+ */
+export async function reorderSounds(db: D1Database, pageId: string, ids: unknown): Promise<boolean> {
+  if (!Array.isArray(ids) || !ids.every((x) => typeof x === "string")) return false;
+  const { results } = await db.prepare(`SELECT id FROM sounds WHERE page_id = ?`).bind(pageId).all<{ id: string }>();
+  const have = new Set(results.map((r) => r.id));
+  if (ids.length !== have.size || new Set(ids).size !== ids.length || !ids.every((id) => have.has(id))) return false;
+  if (!ids.length) return true;
+  await db.batch(ids.map((id, i) => db.prepare(`UPDATE sounds SET position = ? WHERE id = ? AND page_id = ?`).bind(i, id, pageId)));
+  return true;
+}
+
 // --- deletes (return orphaned storage keys) ------------------------------------
 
 const keysOf = (r: D1Result) => (r.results as { key: string }[]).map((x) => x.key);

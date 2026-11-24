@@ -32,7 +32,16 @@ async function body(req: Request): Promise<Record<string, unknown> | null> {
 
 async function api(req: Request, env: Env, path: string, method: string): Promise<Response> {
   const parts = path.split("/").filter(Boolean); // ["api", resource, id?]
-  const [, resource, id] = parts;
+  const [, resource, id, sub] = parts;
+
+  // Drag-to-reorder: the page's full pad order, saved in one go.
+  if (resource === "pages" && id && sub === "order" && method === "PUT") {
+    const payload = await body(req);
+    return (await db.reorderSounds(env.DB, id, payload?.ids))
+      ? json({ ok: true })
+      : err("ids must list exactly this page's sounds", 400);
+  }
+  if (sub) return err("not found", 404);
 
   if (resource === "boards" && !id) {
     if (method === "GET") return json({ boards: await db.listBoards(env.DB), tokenRequired: true });
